@@ -8,3 +8,6 @@
 *.lss
 *.map
 *.sym
+
+# build log
+GTVHacker-build.log
