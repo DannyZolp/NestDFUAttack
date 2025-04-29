@@ -347,7 +347,7 @@ if ($hz eq '--can') {
 	foreach $hz (@hzlist) {
 		my @values = compute_values($hz);
 		print "$pf$hz => [\n";
-		while (scalar(@values)) {
+		while (@values) {
 			my $bit;
 			foreach $bit (32) {
 				my $m = shift(@values);
@@ -370,7 +370,7 @@ if ($hz eq '--can') {
 	}
 
 	@val = @{$canned_values{$hz}};
-	if (!defined(@val)) {
+	if (!@val) {
 		@val = compute_values($hz);
 	}
 	output($hz, @val);
