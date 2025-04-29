@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Change to the directory containing this script
+cd "$(dirname "$0")"
+
+
 #Redirect output to log
 exec 3>&1 1>>GTVHacker-build.log 2>&1
 set -x
@@ -75,7 +79,7 @@ if [ ! -f omap3_usbload/omap3_usbload ]
     fi
 
 echo "[I] - Copying files to \"Release\" directory." 1>&3
-cp u-boot/u-boot.bin ../Release/Nest/ 
+cp u-boot/u-boot.bin ../Release/Nest/
 cp x-loader/x-load.bin ../Release/Nest/
 cp linux/arch/arm/boot/uImage ../Release/Nest/
 cp omap3_usbload/omap3_usbload ../Release/Linux/
