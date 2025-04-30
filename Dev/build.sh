@@ -17,16 +17,19 @@ echo " ██║   ██║  ██║   ╚██╗ ██╔╝██╔═�
 echo " ╚██████╔╝  ██║    ╚████╔╝ ██║  ██║██║  ██║╚██████╗██║  ██╗███████╗██║  ██║" 1>&3
 echo "  ╚═════╝   ╚═╝     ╚═══╝  ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝" 1>&3
 
-echo "[I] - Downloading Nest toolchain. (80.5 MB)" 1>&3
-mkdir toolchain
-cd toolchain
-wget http://files.chumby.com/toolchain/arm-2008q3-72-arm-none-linux-gnueabi-i686-pc-linux-gnu.tar.bz2
+if [ ! -d toolchain/arm-2008q3 ]; then
+    echo "[I] - Downloading Nest toolchain. (80.5 MB)" 1>&3
+    mkdir -p toolchain
+    cd toolchain
+    if [ ! -f arm-2008q3-72-arm-none-linux-gnueabi-i686-pc-linux-gnu.tar.bz2 ]; then
+        wget http://files.chumby.com/toolchain/arm-2008q3-72-arm-none-linux-gnueabi-i686-pc-linux-gnu.tar.bz2
+    fi
+    tar xjvf arm-2008q3-72-arm-none-linux-gnueabi-i686-pc-linux-gnu.tar.bz2
+    rm arm-2008q3-72-arm-none-linux-gnueabi-i686-pc-linux-gnu.tar.bz2
+    cd ..
+fi
 
-echo "[I] - Extracting and setting up toolchain." 1>&3
-tar xjvf arm-2008q3-72-arm-none-linux-gnueabi-i686-pc-linux-gnu.tar.bz2
-rm arm-2008q3-72-arm-none-linux-gnueabi-i686-pc-linux-gnu.tar.bz2
-PATH=$PATH:`pwd`/arm-2008q3/bin
-cd ..
+export PATH="$PATH:$(pwd)/toolchain/arm-2008q3/bin"
 
 echo "[I] - Cross compiling u-boot." 1>&3
 cd u-boot
