@@ -32,6 +32,7 @@ RUN apt-get update && \
     libssl-dev \
     linux-headers-generic \
     libusb-dev \
+    libusb-0.1-4 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create workspace directory
