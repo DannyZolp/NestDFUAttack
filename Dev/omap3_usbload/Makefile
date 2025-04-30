@@ -1,6 +1,6 @@
 CC = gcc
 INCLUDES =
-LIBS = -lusb
+LIBS = -lusb-1.0
 LDFLAGS = $(LIBS)
 APP_NAME = omap3_usbload
 

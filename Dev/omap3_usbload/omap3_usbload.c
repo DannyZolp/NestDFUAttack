@@ -79,7 +79,28 @@ setenv bootargs console=ttyS2,115200n8 mem=128M no_console_suspend ramdisk_size=
 #include <stdio.h>
 #include <fcntl.h>
 #include <stdarg.h>
-#include <usb.h>
+#include <libusb-1.0/libusb.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+static const char* usb_error_str(int code) {
+    switch (code) {
+        case LIBUSB_SUCCESS: return "Success";
+        case LIBUSB_ERROR_IO: return "Input/output error";
+        case LIBUSB_ERROR_INVALID_PARAM: return "Invalid parameter";
+        case LIBUSB_ERROR_ACCESS: return "Access denied (insufficient permissions)";
+        case LIBUSB_ERROR_NO_DEVICE: return "No such device (it may have been disconnected)";
+        case LIBUSB_ERROR_NOT_FOUND: return "Entity not found";
+        case LIBUSB_ERROR_BUSY: return "Resource busy";
+        case LIBUSB_ERROR_TIMEOUT: return "Operation timed out";
+        case LIBUSB_ERROR_OVERFLOW: return "Overflow";
+        case LIBUSB_ERROR_PIPE: return "Pipe error";
+        case LIBUSB_ERROR_INTERRUPTED: return "System call interrupted";
+        case LIBUSB_ERROR_NO_MEM: return "Insufficient memory";
+        case LIBUSB_ERROR_NOT_SUPPORTED: return "Operation not supported or unimplemented";
+        default: return "Unknown error";
+    }
+}
 
 #define VERSION "1.1"
 
@@ -121,7 +142,7 @@ struct UPLOAD_DATA
 	int filesize[MAX_FILES];
 	const char *filename[MAX_FILES];  /* file names */
 	unsigned long jump_addr;
-	usb_dev_handle *udev;
+    libusb_device_handle *udev;
 	int verbose;  /* be verbose? */
 	char *p_file;
 	};
@@ -149,23 +170,21 @@ const struct option long_options[] = {
 /* send a value to x-loader */
 static int send_val (struct UPLOAD_DATA *p_data, unsigned int code, unsigned int val1, unsigned int val2)
 {
-	int	res;
-	int buffer[3];
+	    int res, transferred;
+    int buffer[3];
 
-	buffer[0]= code;
-	buffer[1] = cpu_to_le32 (val1);
-	buffer[2] = cpu_to_le32 (val2);
+    buffer[0] = code;
+    buffer[1] = cpu_to_le32(val1);
+    buffer[2] = cpu_to_le32(val2);
 
-	if (p_data->verbose)
-		printf ("send_val code = 0x%x, val1 = 0x%x, val2 = 0x%x\n",(int) buffer[0], (int) buffer[1], (int) buffer[2]);
-	res= usb_bulk_write (p_data->udev, EP_BULK_OUT, (const char *) buffer, sizeof (buffer), USB_TIMEOUT);
-	if (res < sizeof (buffer))
-	{
-		printf ("Error in usb_bulk_write1: %d/8\n", res);
-		return 1;
-	}
-
-	return 0;
+    if (p_data->verbose)
+        printf("send_val code = 0x%x, val1 = 0x%x, val2 = 0x%x\n", (int)buffer[0], (int)buffer[1], (int)buffer[2]);
+    res = libusb_bulk_transfer(p_data->udev, EP_BULK_OUT, (unsigned char *)buffer, sizeof(buffer), &transferred, USB_TIMEOUT);
+    if (res != 0 || transferred != sizeof(buffer)) {
+        printf("Error in libusb_bulk_transfer1: res=%d (%s) transferred=%d/8\n", res, usb_error_str(res), transferred);
+        return 1;
+    }
+    return 0;
 }
 
 void print_usage (FILE* stream, int exit_code)
@@ -192,39 +211,38 @@ int do_files(struct UPLOAD_DATA *p_data)
 	int this_file = 1;  /* start with the 2nd file */
 	char *p_file;
 
-	file_cnt = usb_bulk_read(p_data->udev, EP_BULK_IN, (char *) dat_buf, sizeof (dat_buf), USB_TIMEOUT);
-	if (file_cnt <= 0)
-		{
-		printf("could not get ASIC ID\n");
-		return(-1);
-		}
+	    int transferred;
+    res = libusb_bulk_transfer(p_data->udev, EP_BULK_IN, (unsigned char *)dat_buf, sizeof(dat_buf), &transferred, USB_TIMEOUT);
+    if (res != 0 || transferred <= 0) {
+        printf("could not get ASIC ID (res=%d, %s, transferred=%d)\n", res, usb_error_str(res), transferred);
+        return -1;
+    }
+    file_cnt = transferred;
 
 	command = OMAP3_BOOT_CMD;
-	if (sizeof(command) != usb_bulk_write(p_data->udev, EP_BULK_OUT, (char*) &command, sizeof(command), USB_TIMEOUT))
-		{
-		printf("could not send peripheral boot command\n");
-		return(-1);
-		}
+	    res = libusb_bulk_transfer(p_data->udev, EP_BULK_OUT, (unsigned char *)&command, sizeof(command), &transferred, USB_TIMEOUT);
+    if (res != 0 || transferred != sizeof(command)) {
+        printf("could not send peripheral boot command (res=%d, %s, transferred=%d)\n", res, usb_error_str(res), transferred);
+        return -1;
+    }
 
 	file_len = p_data->filesize[0];
-	if (sizeof(file_len) != usb_bulk_write(p_data->udev, EP_BULK_OUT, (char*) &file_len, sizeof(file_len), USB_TIMEOUT))
-		{
-		printf("could not send length\n");
-		return(-1);
-		}
+	    res = libusb_bulk_transfer(p_data->udev, EP_BULK_OUT, (unsigned char *)&file_len, sizeof(file_len), &transferred, USB_TIMEOUT);
+    if (res != 0 || transferred != sizeof(file_len)) {
+        printf("could not send length (res=%d, %s, transferred=%d)\n", res, usb_error_str(res), transferred);
+        return -1;
+    }
 
 	do
 		{
 		file_cnt = read(p_data->fd[0], dat_buf, sizeof (dat_buf));
 		if (file_cnt > 0)
 			{
-			usb_cnt = usb_bulk_write(p_data->udev, EP_BULK_OUT, (char *) dat_buf, file_cnt, USB_TIMEOUT);            
-
-			if (usb_cnt != file_cnt)
-				{
-				printf("could not write to usb usb_cnt = %d file_cnt = %d\n", usb_cnt, file_cnt );
-				return(-1);
-				}
+			    res = libusb_bulk_transfer(p_data->udev, EP_BULK_OUT, (unsigned char *)dat_buf, file_cnt, &transferred, USB_TIMEOUT);
+    if (res != 0 || transferred != file_cnt) {
+        printf("could not write to usb (res=%d, %s, transferred=%d, file_cnt=%d)\n", res, usb_error_str(res), transferred, file_cnt);
+        return -1;
+    }
 			}
 		} while (file_cnt > 0);
 
@@ -256,14 +274,16 @@ int do_files(struct UPLOAD_DATA *p_data)
 
 		while (size > 0)
 			{
-			res= usb_bulk_read (p_data->udev, EP_BULK_IN, (char *) dat_buf, sizeof (dat_buf), USB_TIMEOUT);
-			if (res < 0)
-				{
-				printf("Error in usb_bulk_read: %d\n", res);
-				return 1;
-				}
-			if (res < 8)
-				continue;
+			    int transferred;
+			    res = libusb_bulk_transfer(p_data->udev, EP_BULK_IN, (unsigned char *)dat_buf, sizeof(dat_buf), &transferred, USB_TIMEOUT);
+			    if (res != 0) {
+			        printf("Error in libusb_bulk_transfer: %d (%s)\n", res, usb_error_str(res));
+			        return 1;
+			    }
+			    if (transferred < 8) {
+			        printf("Short read: %d bytes\n", transferred);
+			        return 1;
+			    }
 
 			switch (dat_buf[0])
 				{
@@ -286,23 +306,24 @@ int do_files(struct UPLOAD_DATA *p_data)
 						printf("sending file, size %d %d\n", sz, res);
 					while (sz > 0)
 						{
-						res = usb_bulk_write(p_data->udev, EP_BULK_OUT, p_file, BUF_LEN_SM, USB_TIMEOUT);
-						if (res != BUF_LEN_SM) {
-							printf("Error in usb_bulk_write3: %d/%d\n", res, sz);
-							size = -1;
-							break;
-							}
-						p_file += res;
-						sz -= res;
+						    int chunk_transferred;
+						    res = libusb_bulk_transfer(p_data->udev, EP_BULK_OUT, (unsigned char *)p_file, BUF_LEN_SM, &chunk_transferred, USB_TIMEOUT);
+						    if (res != 0 || chunk_transferred != BUF_LEN_SM) {
+						        printf("Error in libusb_bulk_transfer3: res=%d (%s) transferred=%d/%d\n", res, usb_error_str(res), chunk_transferred, sz);
+						        size = -1;
+						        break;
+						    }
+						    p_file += chunk_transferred;
+						    sz -= chunk_transferred;
 						}
-					break;
+						break;
 
-				case USBLOAD_CMD_MESSAGE:
-					printf("Message: %s\n", (char *) &dat_buf[1]);
-					break;
+					case USBLOAD_CMD_MESSAGE:
+						printf("Message: %d\n", dat_buf[1]);
+						break;
 
 				default:
-					printf("Unknown packet type '%s'\n", (char *) dat_buf[1]);
+					printf("Unknown packet type: 0x%08x\n", dat_buf[1]);
 					break;
 				}
 			}
@@ -331,7 +352,10 @@ int main(int argc, char **argv)
 	{
 	struct UPLOAD_DATA *p_data;
 	int next_option;
-	struct usb_bus *bus;
+    libusb_device **devs;
+    ssize_t cnt;
+    int i;
+    libusb_context *ctx = NULL;
 	int file_cntr = 0, res = RET_IN_LOOP;
 
 	p_data = &upload_data;
@@ -390,53 +414,88 @@ int main(int argc, char **argv)
 		return(-1);
 		}
 
-	usb_init();
-	usb_find_busses();
+    if (libusb_init(&ctx) < 0) {
+        fprintf(stderr, "libusb_init failed\n");
+        return 1;
+    }
+    libusb_set_option(ctx, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_WARNING);
 
 	while (res == RET_IN_LOOP)
 		{
 		printf(".");
 		fflush(stdout);
 
-		if (usb_find_devices())
-			{
-			for (bus = usb_get_busses(); bus; bus = bus->next)
-				{
-				struct usb_device *dev;
-
-				for (dev = bus->devices; dev; dev = dev->next)
-					{
-					if (dev->descriptor.idVendor == VENDOR_ID_TI &&
-						(dev->descriptor.idProduct & DEVICE_ID_MASK) == DEVICE_ID)
-						{
-						p_data->udev = usb_open(dev);
-
-						if (p_data->udev)
-							{
-							if (p_data->verbose)
-								printf("\n\nfound device 0x%04x:0x%04x\n", dev->descriptor.idVendor, dev->descriptor.idProduct);
-
-							if (usb_set_configuration(p_data->udev, 1) < 0)
-								{
-								printf("could not set configuration\n");
-								res = RET_ERR;
-								}
-							if (do_files(p_data))  /* if an error occurred */
-								res = RET_ERR;
-							else
-								res = RET_OK;
-							}
-						}
-					}
-				}
-			}
-		usleep(500 * 1000); /* wait until we put another dot */
+        cnt = libusb_get_device_list(ctx, &devs);
+        if (cnt < 0) {
+            fprintf(stderr, "libusb_get_device_list failed\n");
+            break;
+        }
+        for (i = 0; devs[i]; i++) {
+            struct libusb_device_descriptor desc;
+            if (libusb_get_device_descriptor(devs[i], &desc) < 0)
+                continue;
+            if (desc.idVendor == VENDOR_ID_TI && (desc.idProduct & DEVICE_ID_MASK) == DEVICE_ID) {
+                if (libusb_open(devs[i], &p_data->udev) == 0 && p_data->udev) {
+                    if (p_data->verbose)
+                        printf("\n\nfound device 0x%04x:0x%04x\n", desc.idVendor, desc.idProduct);
+                    if (libusb_set_configuration(p_data->udev, 1) < 0) {
+                        printf("could not set configuration\n");
+                        res = RET_ERR;
+                    }
+                    int active_config = -1;
+                    libusb_get_configuration(p_data->udev, &active_config);
+                    printf("Active configuration: %d\n", active_config);
+                    // Detach kernel driver if needed
+                    if (libusb_kernel_driver_active(p_data->udev, 0) == 1) {
+                        printf("Detaching kernel driver from interface 0\n");
+                        if (libusb_detach_kernel_driver(p_data->udev, 0) != 0) {
+                            printf("Warning: could not detach kernel driver\n");
+                        }
+                    }
+                    if (libusb_claim_interface(p_data->udev, 0) < 0) {
+                        printf("could not claim interface\n");
+                        res = RET_ERR;
+                    }
+                    // Print endpoint info
+                    struct libusb_config_descriptor *config;
+                    if (libusb_get_active_config_descriptor(libusb_get_device(p_data->udev), &config) == 0) {
+                        const struct libusb_interface *iface = &config->interface[0];
+                        const struct libusb_interface_descriptor *altsetting = &iface->altsetting[0];
+                        printf("Interface 0, altsetting 0 has %d endpoints:\n", altsetting->bNumEndpoints);
+                        int found_bulk_out = 0;
+                        for (int ep = 0; ep < altsetting->bNumEndpoints; ++ep) {
+                            const struct libusb_endpoint_descriptor *epd = &altsetting->endpoint[ep];
+                            printf("  Endpoint 0x%02x: type %d, max packet size %d\n", epd->bEndpointAddress, epd->bmAttributes & 0x3, epd->wMaxPacketSize);
+                            if ((epd->bEndpointAddress == 0x01) && ((epd->bmAttributes & 0x3) == LIBUSB_TRANSFER_TYPE_BULK))
+                                found_bulk_out = 1;
+                        }
+                        if (!found_bulk_out) {
+                            printf("WARNING: Bulk OUT endpoint 0x01 not found on interface 0!\n");
+                        }
+                        libusb_free_config_descriptor(config);
+                    } else {
+                        printf("Could not get config descriptor\n");
+                    }
+                    printf("Claimed interface 0. Waiting 200ms before transfer...\n");
+                    usleep(200 * 1000);
+                    if (do_files(p_data))
+                        res = RET_ERR;
+                    else
+                        res = RET_OK;
+                    libusb_release_interface(p_data->udev, 0);
+                }
+            }
+        }
+        libusb_free_device_list(devs, 1);
+        usleep(500 * 1000); /* wait until we put another dot */
 		}
 	for (file_cntr = 0; file_cntr < MAX_FILES; file_cntr++)  /* close all files */
 		if (p_data->fd[file_cntr])
 			close(p_data->fd[file_cntr]);
 	if (p_data->p_file)
 		free (p_data->p_file);
-	usb_close(p_data->udev);
+    if (p_data->udev)
+        libusb_close(p_data->udev);
+    libusb_exit(ctx);
 	return(res);
 	}
