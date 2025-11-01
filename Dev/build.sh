@@ -31,6 +31,42 @@ fi
 
 export PATH="$PATH:$(pwd)/toolchain/arm-2008q3/bin"
 
+# Build and install GNU coreutils for the target and put the binaries into the
+# project `root/` directory so they will be available on the target rootfs.
+echo "[I] - Downloading and cross-compiling GNU coreutils for target." 1>&3
+COREUTILS_VERSION=8.32
+COREUTILS_TAR=coreutils-${COREUTILS_VERSION}.tar.xz
+if [ ! -d coreutils-${COREUTILS_VERSION} ]; then
+    if [ ! -f ${COREUTILS_TAR} ]; then
+        echo "[I] - Downloading ${COREUTILS_TAR}" 1>&3
+        wget https://ftp.gnu.org/gnu/coreutils/${COREUTILS_TAR}
+    fi
+    tar xf ${COREUTILS_TAR}
+fi
+
+# safe parallel job count for make (works on macOS/linux)
+NPROC=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
+
+echo "[I] - Configuring and building coreutils (this may take a few minutes)." 1>&3
+cd coreutils-${COREUTILS_VERSION}
+make distclean > /dev/null 2>&1 || true
+
+# Tell coreutils to use the cross tools from the toolchain already added to PATH.
+export CC=arm-none-linux-gnueabi-gcc
+export AR=arm-none-linux-gnueabi-ar
+export RANLIB=arm-none-linux-gnueabi-ranlib
+
+# Install into the project's root directory (root/). This places executables into root/bin
+PREFIX="$(pwd)/../root"
+./configure --host=arm-none-linux-gnueabi --prefix=${PREFIX} || {
+    echo "[E] - coreutils configure failed." 1>&3
+    cd ..
+}
+make -j${NPROC} || make || { echo "[E] - coreutils build failed." 1>&3; cd ..; }
+make install || { echo "[E] - coreutils install failed." 1>&3; cd ..; }
+cd ..
+
+
 echo "[I] - Cross compiling u-boot." 1>&3
 cd u-boot
 make ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabi- distclean
